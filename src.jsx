@@ -1,0 +1,46 @@
+import React, {useEffect,useMemo,useState} from 'react';
+import {createRoot} from 'react-dom/client';
+import './style.css';
+
+const money = n => new Intl.NumberFormat('en-PH',{style:'currency',currency:'PHP',maximumFractionDigits:2}).format(n||0);
+const today = new Date();
+function ageDays(date){ if(!date)return 0; return Math.max(0,Math.floor((today-new Date(date+'T00:00:00'))/86400000)); }
+function App(){
+ const [rows,setRows]=useState([]),[query,setQuery]=useState(''),[filter,setFilter]=useState('all'),[sort,setSort]=useState('balance'),[threshold,setThreshold]=useState(30),[selected,setSelected]=useState(null);
+ const asOf = new Intl.DateTimeFormat('en-PH',{year:'numeric',month:'short',day:'numeric'}).format(today);
+ useEffect(()=>{fetch('/invoices.json').then(r=>r.json()).then(setRows).catch(()=>{});},[]);
+ const enriched=useMemo(()=>rows.map(r=>({...r,age:ageDays(r.date),balance:Math.max(0,Number(r.balance)||0)})),[rows]);
+ const active=enriched.filter(r=>r.balance>0);
+ const filtered=useMemo(()=>active.filter(r=>{
+   const q=query.toLowerCase().trim();
+   const matches=!q||[r.customer,r.invoice,r.salesman,r.terms].join(' ').toLowerCase().includes(q);
+   const bucket=filter==='all'||(filter==='current'&&r.age<threshold)||(filter==='overdue'&&r.age>=threshold)||(filter==='30'&&r.age>=30&&r.age<60)||(filter==='60'&&r.age>=60&&r.age<90)||(filter==='90'&&r.age>=90);
+   return matches&&bucket;
+ }).sort((a,b)=>sort==='customer'?a.customer.localeCompare(b.customer):sort==='age'?b.age-a.age:b.balance-a.balance),[active,query,filter,sort,threshold]);
+ const total=active.reduce((s,r)=>s+r.balance,0), overdue=active.filter(r=>r.age>=threshold), overdueTotal=overdue.reduce((s,r)=>s+r.balance,0);
+ const customers=new Set(active.map(r=>r.customer)).size;
+ function exportCSV(){const head=['Invoice Date','Invoice No.','Customer','Receivable (PHP)','Received (PHP)','Unpaid Balance (PHP)','Age (days)','Aging Band','Payment Status','Salesperson','Terms / Remarks'];
+ const lines=[head,...filtered.map(r=>[r.date,r.invoice,r.customer,r.receivable,r.received,r.balance,r.age,r.age>=90?'90+ days':r.age>=60?'60–89 days':r.age>=30?'30–59 days':'0–29 days',r.status,r.salesman,r.terms])].map(row=>row.map(v=>'"'+String(v??'').replaceAll('"','""')+'"').join(',')).join('\n');
+ const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+lines],{type:'text/csv;charset=utf-8;'}));a.download='carkitz-accounts-aging.csv';a.click();URL.revokeObjectURL(a.href);}
+ return <div className="app">
+  <header><div className="brand"><div className="mark">C</div><div><div className="company">CARKITZ <span>TECHNOLOGY</span></div><div className="subbrand">PHILIPPINES INC. · ACCOUNTS RECEIVABLE</div></div></div><div className="header-right"><span className="live-dot"></span> INTERNAL DASHBOARD <span className="date">As of {asOf}</span></div></header>
+  <main><section className="intro"><div><div className="eyebrow">FINANCE OVERVIEW</div><h1>Client balances</h1><p>Track unpaid invoices, customer balances, and aging at a glance.</p></div><button className="export" onClick={exportCSV}>↓ Export CSV</button></section>
+   <div className="notice"><span className="notice-icon">i</span><div><b>Aging is calculated from invoice date.</b> The spreadsheet does not include contractual due dates. The “overdue” view below is an estimate using a <b>{threshold}-day</b> threshold; adjust it to match your payment terms.</div><label className="threshold">Overdue after <select value={threshold} onChange={e=>setThreshold(Number(e.target.value))}><option value="15">15 days</option><option value="30">30 days</option><option value="45">45 days</option><option value="60">60 days</option><option value="90">90 days</option></select></label></div>
+   <section className="stats">
+    <div className="stat primary"><div className="stat-top"><span>Total unpaid balance</span><span className="stat-icon">₱</span></div><div className="stat-value">{money(total)}</div><div className="stat-foot">{active.length} invoice records with balance</div></div>
+    <div className="stat"><div className="stat-top"><span>Estimated overdue</span><span className="pill red">AGED</span></div><div className="stat-value">{money(overdueTotal)}</div><div className="stat-foot">{overdue.length} invoices aged {threshold}+ days</div></div>
+    <div className="stat"><div className="stat-top"><span>Clients with balance</span><span className="stat-icon">♙</span></div><div className="stat-value">{customers}</div><div className="stat-foot">Distinct customer accounts</div></div>
+    <div className="stat"><div className="stat-top"><span>Invoice records</span><span className="stat-icon">▤</span></div><div className="stat-value">{active.length}</div><div className="stat-foot">Sales invoice workbook · through Nov 3, 2026</div></div>
+   </section>
+   <section className="aging-section"><div className="section-head"><div><h2>Aging summary</h2><p>Unpaid balance grouped by days since invoice date</p></div></div><div className="aging-grid">
+    {[{label:'0–29 days',min:0,max:30,cls:'blue'},{label:'30–59 days',min:30,max:60,cls:'gold'},{label:'60–89 days',min:60,max:90,cls:'orange'},{label:'90+ days',min:90,max:Infinity,cls:'red'}].map(b=>{let list=active.filter(r=>r.age>=b.min&&r.age<b.max),sum=list.reduce((s,r)=>s+r.balance,0);return <button key={b.label} className={'aging-card '+b.cls+(filter===b.label?' selected':'')} onClick={()=>setFilter(filter===b.label?'all':b.label==='0–29 days'?'current':b.label==='30–59 days'?'30':b.label==='60–89 days'?'60':'90')}><span>{b.label}</span><strong>{money(sum)}</strong><small>{list.length} invoices</small><div className="bar"><i style={{width:(total?sum/total*100:0)+'%'}}/></div></button>})}
+   </div></section>
+   <section className="table-section"><div className="table-title"><div><h2>Unpaid invoices</h2><p>Search by customer, invoice number, salesperson, or terms.</p></div><span className="count">{filtered.length} records</span></div>
+    <div className="controls"><div className="search"><span>⌕</span><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search clients or invoice number…"/></div><select value={filter} onChange={e=>setFilter(e.target.value)}><option value="all">All balances</option><option value="current">Not yet aged</option><option value="overdue">Estimated overdue</option><option value="30">30–59 days</option><option value="60">60–89 days</option><option value="90">90+ days</option></select><select value={sort} onChange={e=>setSort(e.target.value)}><option value="balance">Highest balance</option><option value="age">Oldest invoice</option><option value="customer">Customer A–Z</option></select></div>
+    <div className="table-wrap"><table><thead><tr><th>CLIENT / CUSTOMER</th><th>INVOICE NO.</th><th>INVOICE DATE</th><th>AGE</th><th>UNPAID BALANCE</th><th>AGING</th><th></th></tr></thead><tbody>{filtered.slice(0,300).map((r,i)=><tr key={r.invoice+'-'+i} onClick={()=>setSelected(r)}><td><b className="client">{r.customer}</b><small>{r.salesman?`Sales: ${r.salesman}`:'Salesperson not listed'}</small></td><td className="invoice">{r.invoice}</td><td>{r.date}</td><td><span className="age">{r.age} days</span></td><td className="amount">{money(r.balance)}</td><td><span className={'status '+(r.age>=threshold?'overdue':'current')}>{r.age>=threshold?'AGED':'CURRENT'}</span></td><td className="chevron">›</td></tr>)}</tbody></table>{filtered.length===0&&<div className="empty">No unpaid invoices match your search.</div>}{filtered.length>300&&<div className="more">Showing first 300 records. Export CSV to download the full filtered list.</div>}</div>
+   </section><footer><span>© Carkitz Technology Philippines Inc.</span><span>Private internal use · Source: Sales Invoice workbook</span></footer>
+  </main>
+  {selected&&<div className="overlay" onClick={()=>setSelected(null)}><div className="modal" onClick={e=>e.stopPropagation()}><button className="close" onClick={()=>setSelected(null)}>×</button><div className="eyebrow">INVOICE DETAILS</div><h2>{selected.customer}</h2><p className="modal-invoice">{selected.invoice}</p><div className="detail-balance"><small>Estimated unpaid balance</small><strong>{money(selected.balance)}</strong></div><div className="details"><div><small>Invoice date</small><b>{selected.date}</b></div><div><small>Age</small><b>{selected.age} days</b></div><div><small>Receivable</small><b>{money(selected.receivable)}</b></div><div><small>Recorded receipts</small><b>{money(selected.received)}</b></div><div><small>Payment status in file</small><b>{selected.status}</b></div><div><small>Salesperson</small><b>{selected.salesman||'—'}</b></div><div><small>Delivery status</small><b>{selected.delivery||'—'}</b></div><div><small>Invoicing status</small><b>{selected.invoicing||'—'}</b></div><div className="wide"><small>Document remarks / payment terms</small><b>{selected.terms||'No remarks provided'}</b></div></div><p className="modal-note">Confirm against the latest official ledger and payment records before contacting the client. Aging is based on invoice date, not a verified due date.</p></div></div>}
+ </div>
+}
+createRoot(document.getElementById('root')).render(<App/>);

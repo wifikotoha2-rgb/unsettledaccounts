@@ -1,0 +1,8 @@
+CARKITZ ACCOUNTS DASHBOARD - DATA UPDATE
+Updated using Sales+Invoice workbook exported 2026-11-03.
+- Replaced public/invoices.json with 787 unique invoice records.
+- Workbook period represented: 2024-01-01 through 2026-11-03 (as provided).
+- Balance is calculated as Receivable from this order minus Actual receipt of this order, floored at zero.
+- Added delivery and invoicing status fields to invoice records and invoice detail view.
+- Dashboard aging reference date now follows the current browser date.
+- Aging is still calculated from invoice date because the workbook does not provide contractual due dates.
